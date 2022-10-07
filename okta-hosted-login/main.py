@@ -1,4 +1,7 @@
 import requests
+import random
+import string
+import pkce
 
 from flask import Flask, render_template, redirect, request, url_for
 from flask_login import (
@@ -24,6 +27,9 @@ APP_STATE = 'ApplicationState'
 NONCE = 'SampleNonce'
 
 
+# create verifier and challenge
+code_verifier, code_challenge = pkce.generate_pkce_pair()
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.get(user_id)
@@ -42,6 +48,8 @@ def login():
                     'scope': "openid email profile",
                     'state': APP_STATE,
                     'nonce': NONCE,
+                    'code_challenge_method': 'S256',
+                    'code_challenge': code_challenge,
                     'response_type': 'code',
                     'response_mode': 'query'}
 
@@ -66,16 +74,19 @@ def callback():
     code = request.args.get("code")
     if not code:
         return "The code was not returned or is not accessible", 403
+
     query_params = {'grant_type': 'authorization_code',
                     'code': code,
+                    'code_verifier': code_verifier,
+                    'client_id': config["client_id"],
                     'redirect_uri': request.base_url
                     }
     query_params = requests.compat.urlencode(query_params)
+
     exchange = requests.post(
         config["token_uri"],
         headers=headers,
         data=query_params,
-        auth=(config["client_id"], config["client_secret"]),
     ).json()
 
     # Get tokens and validate
@@ -93,6 +104,7 @@ def callback():
     # Authorization flow successful, get userinfo and login user
     userinfo_response = requests.get(config["userinfo_uri"],
                                      headers={'Authorization': f'Bearer {access_token}'}).json()
+
 
     unique_id = userinfo_response["sub"]
     user_email = userinfo_response["email"]
